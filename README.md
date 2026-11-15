@@ -26,12 +26,16 @@ Sovellus on pelkkiä staattisia tiedostoja, eikä se tarvitse käännösvaihetta
 Paikallisesti:
 
 ```sh
-python3 -m http.server 8000
+cd public && python3 -m http.server 8000
 # avaa http://localhost:8000
 ```
 
-Puhelimeen: julkaise esim. **GitHub Pagesissa** (Settings → Pages → branch), avaa osoite puhelimen
-selaimessa ja valitse *Lisää kotivalikkoon / Asenna sovellus*. Sen jälkeen sovellus toimii myös offline.
+Julkaisu: sovellus on julkaistu Cloudflare Workersissa osoitteessa **https://neule.promptly.fi**.
+Cloudflare julkaisee `public/`-kansion automaattisesti jokaisesta GitHubiin tulevasta muutoksesta
+(asetukset `wrangler.jsonc`:ssä).
+
+Puhelimeen: avaa osoite puhelimen selaimessa ja valitse *Lisää kotivalikkoon / Asenna sovellus*.
+Sen jälkeen sovellus toimii myös offline.
 
 > Huom. tiedot ovat laitekohtaisia. Siirrä ne toiselle laitteelle varmuuskopion avulla.
 
@@ -39,8 +43,9 @@ selaimessa ja valitse *Lisää kotivalikkoon / Asenna sovellus*. Sen jälkeen so
 
 | Tiedosto | Sisältö |
 |---|---|
-| `index.html` | Sivun runko |
-| `app.js` | Näkymät, tallennus, lankalaskuri, varmuuskopiot |
-| `db.js` | IndexedDB-tallennus |
-| `style.css` | Ulkoasu (vaalea ja tumma teema) |
-| `sw.js`, `manifest.webmanifest` | Offline-tuki ja asennettavuus |
+| `public/index.html` | Sivun runko |
+| `public/app.js` | Näkymät, tallennus, lankalaskuri, varmuuskopiot |
+| `public/db.js` | IndexedDB-tallennus |
+| `public/style.css` | Ulkoasu (vaalea ja tumma teema) |
+| `public/sw.js`, `public/manifest.webmanifest` | Offline-tuki ja asennettavuus |
+| `wrangler.jsonc` | Cloudflare-julkaisun asetukset |
