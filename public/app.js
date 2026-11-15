@@ -16,13 +16,24 @@ const TOOL_TYPES = {
   muu: 'Muu väline',
 };
 const NEED_UNITS = { m: 'metriä', g: 'grammaa', k: 'kerää' };
+const YARN_WEIGHTS = {
+  '': 'Ei tiedossa',
+  lace: 'Lace (pitsilanka)',
+  fingering: 'Fingering / sukkalanka',
+  sport: 'Sport',
+  dk: 'DK',
+  worsted: 'Worsted',
+  aran: 'Aran',
+  bulky: 'Bulky (paksu)',
+  superbulky: 'Super bulky',
+};
 // Välinetyypit, joita voi tallentaa omiin välineisiin
 const INV_TYPES = ['puikot', 'sukkapuikot', 'pyoropuikot', 'koukku'];
 const INV_LABELS = { puikot: 'Neulepuikot', sukkapuikot: 'Sukkapuikot', pyoropuikot: 'Pyöröpuikot', koukku: 'Virkkuukoukut' };
 
 // ---------- Tila ----------
 const app = document.getElementById('app');
-const state = { filter: 'kaikki', search: '', projects: [], inv: [], allProjects: [] };
+const state = { filter: 'kaikki', search: '', projects: [], inv: [], stash: [], allProjects: [] };
 let cur = null; // avoinna oleva työ
 let saveTimer = null;
 
@@ -158,25 +169,69 @@ function projectsUsing(invId) {
 }
 const sameSize = (a, b) => num(a) !== null && num(a) === num(b);
 
-const invTimers = new Map();
-function saveInv(it, now = false) {
-  clearTimeout(invTimers.get(it.id));
+// Varastojen (välineet, langat) viivästetty tallennus
+const itemTimers = new Map();
+function saveItem(store, it, now = false) {
+  const key = store + ':' + it.id;
+  clearTimeout(itemTimers.get(key)?.timer);
   if (now) {
-    invTimers.delete(it.id);
-    return db.put('tools', it);
+    itemTimers.delete(key);
+    return db.put(store, it);
   }
-  invTimers.set(it.id, setTimeout(() => {
-    invTimers.delete(it.id);
-    db.put('tools', it);
-  }, 400));
+  const timer = setTimeout(() => {
+    itemTimers.delete(key);
+    db.put(store, it);
+  }, 400);
+  itemTimers.set(key, { timer, store, it });
 }
+function cancelItemSave(store, id) {
+  clearTimeout(itemTimers.get(store + ':' + id)?.timer);
+  itemTimers.delete(store + ':' + id);
+}
+const saveInv = (it, now) => saveItem('tools', it, now);
+const saveStash = (it, now) => saveItem('yarns', it, now);
 function flushInv() {
-  const pending = [...invTimers.keys()];
-  return Promise.all(pending.map((id) => {
-    const it = state.inv.find((i) => i.id === id);
-    return it ? saveInv(it, true) : null;
-  }));
+  return Promise.all([...itemTimers.values()].map(({ store, it }) => saveItem(store, it, true)));
 }
+
+// ---------- Lankavarasto ----------
+async function loadStash() {
+  state.stash = await db.all('yarns');
+}
+const stashById = (id) => id && state.stash.find((s) => s.id === id);
+function stashTitle(s) {
+  return [s.brand, s.name].filter(Boolean).join(' ') || 'Nimetön lanka';
+}
+function stashSub(s) {
+  return [s.color, s.lot ? 'erä ' + s.lot : ''].filter(Boolean).join(', ');
+}
+// Työn lanka, jossa varaston tiedot (m/kerä, g/kerä) ovat ajan tasalla
+function effYarn(y) {
+  const st = stashById(y.stashId);
+  return st ? { ...y, metersPerSkein: st.metersPerSkein, gramsPerSkein: st.gramsPerSkein } : y;
+}
+// Keskeneräisten töiden varaukset varaston langasta (kokonaiset kerät)
+function reservations(stashId, excludeProjectId) {
+  const out = [];
+  for (const p of projectsNow()) {
+    if (p.status === 'valmis' || p.id === excludeProjectId) continue;
+    for (const y of p.yarns) {
+      if (y.stashId !== stashId) continue;
+      const c = yarnCalc(effYarn(y));
+      out.push({ p, skeins: c && c.whole !== null ? c.whole : null });
+    }
+  }
+  return out;
+}
+const sumRes = (res) => res.reduce((a, r) => a + (r.skeins || 0), 0);
+const sameText = (a, b) => String(a || '').trim().toLowerCase() === String(b || '').trim().toLowerCase();
+function stashMatch(y) {
+  if (!y.brand && !y.name) return null;
+  return state.stash.find((s) =>
+    sameText(s.brand, y.brand) && sameText(s.name, y.name) && (!y.color || sameText(s.color, y.color))
+  ) || null;
+}
+const skeinWord = (n) => (n === 1 ? 'kerä' : 'kerää');
 
 // ---------- Tallennus ----------
 async function persist(p) {
@@ -235,11 +290,26 @@ function yarnCalc(y) {
 }
 
 function yarnCalcHTML(y) {
-  const c = yarnCalc(y);
-  if (!c) return '<span class="muted">Syötä ohjeen mukainen tarve, niin lasken montako kerää tarvitset.</span>';
+  const st = stashById(y.stashId);
+  const c = yarnCalc(effYarn(y));
+  let stockHTML = '';
+  let free = null;
+  if (st) {
+    const have = num(st.skeins) ?? 0;
+    const others = reservations(st.id, cur?.id);
+    const reserved = sumRes(others);
+    free = have - reserved;
+    stockHTML = `Varastossa ${fmt(have, 1)} ${skeinWord(have)}` +
+      (others.length ? ` – muut työt varaavat ${fmt(reserved)} (${projLinks(others.map((r) => r.p))})` : '');
+  }
+  if (!c) {
+    return (stockHTML ? stockHTML + '<br>' : '') +
+      '<span class="muted">Syötä ohjeen mukainen tarve, niin lasken montako kerää tarvitset.</span>';
+  }
   if (c.whole === null) {
     const missing = (y.needUnit || 'm') === 'g' ? 'grammat / kerä' : 'metrit / kerä';
-    return `<span class="muted">Lisää langan ${missing}, niin lasken kerien määrän.</span>`;
+    return (stockHTML ? stockHTML + '<br>' : '') +
+      `<span class="muted">Lisää langan ${missing}${st ? ' lankavarastoon' : ''}, niin lasken kerien määrän.</span>`;
   }
   const extra = [];
   const unit = y.needUnit || 'm';
@@ -247,15 +317,17 @@ function yarnCalcHTML(y) {
   if (c.grams !== null && unit !== 'g') extra.push(`≈ ${fmt(c.grams)} g`);
   let html = `Tarvitset <strong>${fmt(c.whole)} ${c.whole === 1 ? 'kerän' : 'kerää'}</strong>`;
   if (extra.length) html += ` <span class="muted">(${extra.join(', ')})</span>`;
-  if (c.owned !== null) {
-    const diff = c.owned - c.skeins;
+  const owned = st ? free : c.owned;
+  if (st) html += `<br>${stockHTML}`;
+  if (owned !== null) {
+    const diff = owned - c.skeins;
     if (diff >= -1e-9) {
       html += `<br><span class="ok">✓ Lanka riittää</span>`;
-      const spare = Math.floor(c.owned - c.whole + 1e-9);
-      if (spare > 0) html += ` <span class="muted">– ylimääräistä ${fmt(spare)} ${spare === 1 ? 'kerä' : 'kerää'}</span>`;
+      const spare = Math.floor(owned - c.whole + 1e-9);
+      if (spare > 0) html += ` <span class="muted">– ylimääräistä ${fmt(spare)} ${skeinWord(spare)}</span>`;
     } else {
       const lack = Math.ceil(-diff - 1e-9);
-      html += `<br><span class="warn">✗ Puuttuu ${fmt(lack)} ${lack === 1 ? 'kerä' : 'kerää'}</span>`;
+      html += `<br><span class="warn">✗ Puuttuu ${fmt(lack)} ${skeinWord(lack)}</span>`;
     }
   }
   return html;
@@ -267,6 +339,7 @@ async function route() {
   const m = location.hash.match(/^#\/p\/([\w-]+)/);
   if (m) await showProject(m[1]);
   else if (location.hash.startsWith('#/valineet')) await showInventory();
+  else if (location.hash.startsWith('#/langat')) await showStash();
   else await showList();
   window.scrollTo(0, 0);
 }
@@ -312,8 +385,9 @@ async function showList() {
 
 const navHTML = (active) => `
   <nav class="tabs">
-    <a href="#/" class="${active === 'list' ? 'on' : ''}">🧶 Työt</a>
-    <a href="#/valineet" class="${active === 'inv' ? 'on' : ''}">🪡 Omat välineet</a>
+    <a href="#/" class="${active === 'list' ? 'on' : ''}">📋 Työt</a>
+    <a href="#/langat" class="${active === 'stash' ? 'on' : ''}">🧶 Langat</a>
+    <a href="#/valineet" class="${active === 'inv' ? 'on' : ''}">🪡 Välineet</a>
   </nav>`;
 
 function renderGrid() {
@@ -362,7 +436,7 @@ async function showProject(id) {
     location.hash = '#/';
     return;
   }
-  await loadInv();
+  await Promise.all([loadInv(), loadStash()]);
   state.allProjects = (await db.all('projects')).map(normalize);
   cur = normalize(p);
   document.title = (cur.name || 'Nimetön työ') + ' – Neulemuistio';
@@ -420,6 +494,7 @@ function detailHTML(p) {
       <section class="panel">
         <div class="panel-head"><h2>🧶 Langat</h2><button class="btn small" data-action="add-yarn">+ Lisää lanka</button></div>
         <div data-section="yarns">${yarnsHTML(p)}</div>
+        <div data-section="yarnPicker">${yarnPickerHTML(p)}</div>
       </section>
 
       <section class="panel">
@@ -482,40 +557,199 @@ function patternFilesHTML(p) {
 
 function yarnsHTML(p) {
   if (!p.yarns.length) return '<p class="muted">Ei lankoja vielä.</p>';
-  return p.yarns
-    .map(
-      (y, i) => `
-      <div class="item">
-        <div class="item-head">
-          <strong>Lanka ${i + 1}</strong>
-          <button class="icon-btn" data-action="del-yarn" data-id="${y.id}" title="Poista lanka" aria-label="Poista lanka">✕</button>
+  return p.yarns.map((y, i) => (stashById(y.stashId) ? linkedYarnHTML(y) : yarnFormHTML(y, i))).join('');
+}
+
+const needFieldHTML = (y) => `
+  <label class="field"><span>Ohjeen mukainen tarve</span>
+    <div class="inline">
+      <input inputmode="decimal" data-list="yarns" data-id="${y.id}" data-key="needAmount" value="${esc(y.needAmount)}" placeholder="esim. 800">
+      <select data-list="yarns" data-id="${y.id}" data-key="needUnit" aria-label="Yksikkö">${opts(NEED_UNITS, y.needUnit || 'm')}</select>
+    </div>
+  </label>`;
+
+function linkedYarnHTML(y) {
+  const st = stashById(y.stashId);
+  const meta = [YARN_WEIGHTS[st.weight] && st.weight ? YARN_WEIGHTS[st.weight] : '', st.fiber,
+    num(st.metersPerSkein) !== null ? `${st.metersPerSkein} m / kerä` : '',
+    num(st.gramsPerSkein) !== null ? `${st.gramsPerSkein} g / kerä` : ''].filter(Boolean).join(' · ');
+  return `
+    <div class="item linked">
+      <div class="item-head">
+        <div>
+          <strong>${esc(stashTitle(st))}</strong>${stashSub(st) ? ` <span class="muted">– ${esc(stashSub(st))}</span>` : ''}
+          <div class="muted small-text">🧺 Lankavarastosta${meta ? ' · ' + esc(meta) : ''}</div>
         </div>
-        <div class="row">
-          ${listField('yarns', y, 'brand', 'Merkki', 'placeholder="esim. Novita"')}
-          ${listField('yarns', y, 'name', 'Laatu', 'placeholder="esim. 7 Veljestä"')}
-        </div>
-        <div class="row">
-          ${listField('yarns', y, 'color', 'Väri / sävynro')}
-          ${listField('yarns', y, 'lot', 'Värjäyserä')}
-          ${listField('yarns', y, 'fiber', 'Materiaali', 'placeholder="esim. 75 % villa"')}
-        </div>
-        <div class="row">
-          ${listField('yarns', y, 'metersPerSkein', 'Metriä / kerä', 'inputmode="decimal" placeholder="esim. 200"')}
-          ${listField('yarns', y, 'gramsPerSkein', 'Grammaa / kerä', 'inputmode="decimal" placeholder="esim. 100"')}
-        </div>
-        <div class="row">
-          <label class="field"><span>Ohjeen mukainen tarve</span>
-            <div class="inline">
-              <input inputmode="decimal" data-list="yarns" data-id="${y.id}" data-key="needAmount" value="${esc(y.needAmount)}" placeholder="esim. 800">
-              <select data-list="yarns" data-id="${y.id}" data-key="needUnit" aria-label="Yksikkö">${opts(NEED_UNITS, y.needUnit || 'm')}</select>
-            </div>
-          </label>
-          ${listField('yarns', y, 'skeinsOwned', 'Keriä minulla', 'inputmode="decimal" placeholder="esim. 3"')}
-        </div>
-        <p class="calc" data-calc="${y.id}">${yarnCalcHTML(y)}</p>
-      </div>`
-    )
+        <button class="icon-btn" data-action="del-yarn" data-id="${y.id}" title="Poista lanka työstä" aria-label="Poista lanka työstä">✕</button>
+      </div>
+      <div class="row">${needFieldHTML(y)}</div>
+      <p class="calc" data-calc="${y.id}">${yarnCalcHTML(y)}</p>
+    </div>`;
+}
+
+function yarnFormHTML(y, i) {
+  return `
+    <div class="item">
+      <div class="item-head">
+        <strong>Lanka ${i + 1}</strong>
+        <button class="icon-btn" data-action="del-yarn" data-id="${y.id}" title="Poista lanka" aria-label="Poista lanka">✕</button>
+      </div>
+      <div class="row">
+        ${listField('yarns', y, 'brand', 'Merkki', 'placeholder="esim. Novita"')}
+        ${listField('yarns', y, 'name', 'Laatu', 'placeholder="esim. 7 Veljestä"')}
+      </div>
+      <div class="row">
+        ${listField('yarns', y, 'color', 'Väri / sävynro')}
+        ${listField('yarns', y, 'lot', 'Värjäyserä')}
+      </div>
+      <div class="row">
+        <label class="field"><span>Paksuus</span><select data-list="yarns" data-id="${y.id}" data-key="weight">${opts(YARN_WEIGHTS, y.weight || '')}</select></label>
+        ${listField('yarns', y, 'fiber', 'Materiaali', 'placeholder="esim. 75 % villa"')}
+      </div>
+      <div class="row">
+        ${listField('yarns', y, 'metersPerSkein', 'Metriä / kerä', 'inputmode="decimal" placeholder="esim. 200"')}
+        ${listField('yarns', y, 'gramsPerSkein', 'Grammaa / kerä', 'inputmode="decimal" placeholder="esim. 100"')}
+      </div>
+      <div class="row">
+        ${needFieldHTML(y)}
+        ${listField('yarns', y, 'skeinsOwned', 'Keriä minulla', 'inputmode="decimal" placeholder="esim. 3"')}
+      </div>
+      <div class="tool-status" data-ystatus="${y.id}">${yarnStashStatusHTML(y)}</div>
+      <p class="calc" data-calc="${y.id}">${yarnCalcHTML(y)}</p>
+    </div>`;
+}
+
+function yarnStashStatusHTML(y) {
+  if (!y.brand && !y.name) return '';
+  const m = stashMatch(y);
+  if (m) {
+    const free = (num(m.skeins) ?? 0) - sumRes(reservations(m.id, cur?.id));
+    return `<span class="ok">✓ Löytyy lankavarastosta</span> <span class="muted">(${esc(stashSub(m) || stashTitle(m))}, vapaana ${fmt(Math.max(free, 0), 1)} ${skeinWord(free)})</span>
+      <button class="btn tiny" data-action="link-yarn" data-id="${y.id}" data-stash="${m.id}">Linkitä</button>`;
+  }
+  return `<span class="muted">Ei lankavarastossa.</span>
+    <button class="btn tiny" data-action="yarn-to-stash" data-id="${y.id}" title="Siirrä lanka lankavarastoon">+ Lisää varastoon</button>`;
+}
+
+function yarnPickerHTML(p) {
+  const linked = new Set(p.yarns.map((y) => y.stashId).filter(Boolean));
+  const items = state.stash
+    .filter((s) => !linked.has(s.id))
+    .sort((a, b) => stashTitle(a).localeCompare(stashTitle(b), 'fi') || String(a.color || '').localeCompare(String(b.color || ''), 'fi'));
+  if (!state.stash.length) {
+    return '<p class="muted small-text">Vinkki: tallenna omat lankasi <a href="#/langat">Langat</a>-sivulle, niin voit valita ne suoraan tähän.</p>';
+  }
+  if (!items.length) return '';
+  return `<select id="yarnPicker" class="picker" aria-label="Valitse lankavarastosta">
+      <option value="">+ Valitse lankavarastosta…</option>
+      ${items.map((s) => {
+        const free = (num(s.skeins) ?? 0) - sumRes(reservations(s.id, p.id));
+        return `<option value="${s.id}">${esc(stashTitle(s))}${stashSub(s) ? ', ' + esc(stashSub(s)) : ''} (vapaana ${fmt(Math.max(free, 0), 1)} ${skeinWord(free)})</option>`;
+      }).join('')}
+    </select>`;
+}
+
+// ---------- Lankavarasto-näkymä ----------
+async function showStash() {
+  cur = null;
+  document.title = 'Langat – Neulemuistio';
+  await loadStash();
+  state.allProjects = (await db.all('projects')).map(normalize);
+  app.innerHTML = `
+    <header class="topbar">
+      <h1><img src="icon.svg" alt="" class="logo"> Neulemuistio</h1>
+      <button class="btn primary" data-action="stash-add">+ Lisää lanka</button>
+    </header>
+    ${navHTML('stash')}
+    <p class="muted intro">Tallenna tänne omat lankasi. Töissä voit valita langan varastosta, ja näet riittääkö se – myös kun samaa lankaa on varattu muihin töihin.</p>
+    <p class="stash-total" id="stashTotal"></p>
+    <div id="stashList">${stashListHTML()}</div>`;
+  updateStashTotal();
+}
+
+function updateStashTotal() {
+  const el = document.getElementById('stashTotal');
+  if (!el) return;
+  const n = state.stash.length;
+  const skeins = state.stash.reduce((a, s) => a + (num(s.skeins) ?? 0), 0);
+  const meters = state.stash.reduce((a, s) => a + (num(s.skeins) ?? 0) * (num(s.metersPerSkein) ?? 0), 0);
+  el.innerHTML = n
+    ? `${n} ${n === 1 ? 'lanka' : 'lankaa'} · yhteensä ${fmt(skeins, 1)} ${skeinWord(skeins)}${meters ? ` · ≈ ${fmt(meters)} m` : ''}`
+    : '';
+}
+
+function stashListHTML(openId) {
+  if (!state.stash.length) {
+    return `<div class="empty"><div class="empty-icon">🧺</div><p>Lankavarasto on tyhjä.</p>
+      <button class="btn primary" data-action="stash-add">+ Lisää ensimmäinen lanka</button></div>`;
+  }
+  return [...state.stash]
+    .sort((a, b) => stashTitle(a).localeCompare(stashTitle(b), 'fi') || String(a.color || '').localeCompare(String(b.color || ''), 'fi'))
+    .map((s) => stashItemHTML(s, s.id === openId))
     .join('');
+}
+
+const stashField = (s, key, label, attrs = '') =>
+  `<label class="field"><span>${label}</span><input data-stash="${s.id}" data-key="${key}" value="${esc(s[key])}" ${attrs}></label>`;
+
+function stashItemHTML(s, open) {
+  return `
+    <details class="panel stash-item" ${open ? 'open' : ''}>
+      <summary data-ssum="${s.id}">${stashSummaryHTML(s)}</summary>
+      <div class="stash-fields">
+        <div class="row">
+          ${stashField(s, 'brand', 'Merkki', 'placeholder="esim. Novita"')}
+          ${stashField(s, 'name', 'Laatu', 'placeholder="esim. 7 Veljestä"')}
+        </div>
+        <div class="row">
+          ${stashField(s, 'color', 'Väri / sävynro')}
+          ${stashField(s, 'lot', 'Värjäyserä')}
+        </div>
+        <div class="row">
+          <label class="field"><span>Paksuus</span><select data-stash="${s.id}" data-key="weight">${opts(YARN_WEIGHTS, s.weight || '')}</select></label>
+          ${stashField(s, 'fiber', 'Materiaali', 'placeholder="esim. 75 % villa, 25 % polyamidi"')}
+        </div>
+        <div class="row">
+          ${stashField(s, 'metersPerSkein', 'Metriä / kerä', 'inputmode="decimal" placeholder="200"')}
+          ${stashField(s, 'gramsPerSkein', 'Grammaa / kerä', 'inputmode="decimal" placeholder="100"')}
+          ${stashField(s, 'skeins', 'Keriä varastossa', 'inputmode="decimal" placeholder="esim. 3 tai 2,5"')}
+        </div>
+        <div class="stash-actions">
+          <button class="btn ghost danger small" data-action="stash-del" data-id="${s.id}">Poista varastosta</button>
+        </div>
+      </div>
+    </details>`;
+}
+
+function stashSummaryHTML(s) {
+  const have = num(s.skeins) ?? 0;
+  const res = reservations(s.id, null);
+  const reserved = sumRes(res);
+  const free = have - reserved;
+  const meters = num(s.metersPerSkein) !== null ? have * num(s.metersPerSkein) : null;
+  const grams = num(s.gramsPerSkein) !== null ? have * num(s.gramsPerSkein) : null;
+  const meta = [s.weight ? YARN_WEIGHTS[s.weight] : '', s.fiber].filter(Boolean).join(' · ');
+  const amount = [`<strong>${fmt(have, 1)} ${skeinWord(have)}</strong>`,
+    meters !== null ? `≈ ${fmt(meters)} m` : '', grams !== null ? `≈ ${fmt(grams)} g` : ''].filter(Boolean).join(' · ');
+  let usage = '';
+  if (res.length) {
+    usage = res.map((r) => `<a class="use-chip s-${r.p.status}" href="#/p/${r.p.id}">${esc(r.p.name || 'Nimetön työ')}${r.skeins !== null ? ` · ${fmt(r.skeins)} ${skeinWord(r.skeins)}` : ''}</a>`).join(' ');
+    usage += free >= 0
+      ? ` <span class="ok">Vapaana ${fmt(free, 1)}</span>`
+      : ` <span class="warn">Puuttuu ${fmt(Math.ceil(-free - 1e-9))} ${skeinWord(Math.ceil(-free - 1e-9))}</span>`;
+  } else {
+    usage = '<span class="ok">Vapaana</span>';
+  }
+  return `
+    <div class="stash-head">
+      <div>
+        <strong>${esc(stashTitle(s))}</strong>${stashSub(s) ? ` <span class="muted">– ${esc(stashSub(s))}</span>` : ''}
+        ${meta ? `<div class="muted small-text">${esc(meta)}</div>` : ''}
+      </div>
+      <span class="stash-edit muted small-text">Muokkaa</span>
+    </div>
+    <div class="stash-amount">${amount}</div>
+    <div class="inv-usage">${usage}</div>`;
 }
 
 function toolsHTML(p) {
@@ -581,7 +815,7 @@ function toolStatusHTML(t) {
 
 function toolPickerHTML(p) {
   if (!state.inv.length) {
-    return '<p class="muted small-text">Vinkki: tallenna omat puikkosi ja koukkusi <a href="#/valineet">Omat välineet</a> -sivulle, niin voit valita ne suoraan tähän.</p>';
+    return '<p class="muted small-text">Vinkki: tallenna omat puikkosi ja koukkusi <a href="#/valineet">Välineet</a>-sivulle, niin voit valita ne suoraan tähän.</p>';
   }
   const linked = new Set(p.tools.map((t) => t.inventoryId).filter(Boolean));
   const groups = INV_TYPES.map((type) => {
@@ -605,7 +839,7 @@ function toolPickerHTML(p) {
 // ---------- Omat välineet -näkymä ----------
 async function showInventory() {
   cur = null;
-  document.title = 'Omat välineet – Neulemuistio';
+  document.title = 'Välineet – Neulemuistio';
   await loadInv();
   state.allProjects = (await db.all('projects')).map(normalize);
   app.innerHTML = `
@@ -679,13 +913,11 @@ function notesHTML(p) {
 function refresh(section) {
   const el = app.querySelector(`[data-section="${section}"]`);
   if (!el || !cur) return;
-  const render = { toolPicker: toolPickerHTML, photos: photosHTML, patternFiles: patternFilesHTML, yarns: yarnsHTML, tools: toolsHTML, notes: notesHTML }[section];
+  const render = { yarnPicker: yarnPickerHTML, toolPicker: toolPickerHTML, photos: photosHTML, patternFiles: patternFilesHTML, yarns: yarnsHTML, tools: toolsHTML, notes: notesHTML }[section];
   el.innerHTML = render(cur);
   hydrate(el);
-  if (section === 'tools') {
-    const picker = app.querySelector('[data-section="toolPicker"]');
-    if (picker) picker.innerHTML = toolPickerHTML(cur);
-  }
+  if (section === 'tools') refresh('toolPicker');
+  if (section === 'yarns') refresh('yarnPicker');
 }
 
 // ---------- Syötteet ----------
@@ -694,6 +926,17 @@ app.addEventListener('input', (e) => {
   if (el.id === 'search') {
     state.search = el.value;
     renderGrid();
+    return;
+  }
+  if (el.dataset.stash) {
+    const s = state.stash.find((i) => i.id === el.dataset.stash);
+    if (s) {
+      s[el.dataset.key] = el.value;
+      saveStash(s);
+      const sum = app.querySelector(`[data-ssum="${s.id}"]`);
+      if (sum) sum.innerHTML = stashSummaryHTML(s);
+      updateStashTotal();
+    }
     return;
   }
   if (el.dataset.inv) {
@@ -730,6 +973,10 @@ app.addEventListener('input', (e) => {
     if (el.dataset.list === 'yarns') {
       const calc = app.querySelector(`[data-calc="${item.id}"]`);
       if (calc) calc.innerHTML = yarnCalcHTML(item);
+      if (['brand', 'name', 'color'].includes(el.dataset.key)) {
+        const st = app.querySelector(`[data-ystatus="${item.id}"]`);
+        if (st) st.innerHTML = yarnStashStatusHTML(item);
+      }
     }
     if (el.dataset.list === 'tools') {
       if (el.dataset.key === 'type') {
@@ -742,6 +989,17 @@ app.addEventListener('input', (e) => {
     }
     save();
   }
+});
+
+app.addEventListener('change', (e) => {
+  if (e.target.id !== 'yarnPicker' || !cur) return;
+  const st = stashById(e.target.value);
+  if (!st) return;
+  const y = { id: uid(), needAmount: '', needUnit: 'm' };
+  linkYarnToStash(y, st);
+  cur.yarns.push(y);
+  save(true);
+  refresh('yarns');
 });
 
 app.addEventListener('change', (e) => {
@@ -827,8 +1085,8 @@ const actions = {
 
   'add-yarn'() {
     cur.yarns.push({
-      id: uid(), brand: '', name: '', color: '', lot: '', fiber: '',
-      metersPerSkein: '', gramsPerSkein: '', needAmount: '', needUnit: 'm', skeinsOwned: '',
+      id: uid(), brand: '', name: '', color: '', lot: '', fiber: '', weight: '',
+      metersPerSkein: '', gramsPerSkein: '', needAmount: '', needUnit: 'm', skeinsOwned: '', stashId: null,
     });
     save(true);
     refresh('yarns');
@@ -838,10 +1096,73 @@ const actions = {
   'del-yarn'(el) {
     const y = cur.yarns.find((i) => i.id === el.dataset.id);
     const name = y && [y.brand, y.name].filter(Boolean).join(' ');
-    if (name && !confirm(`Poistetaanko lanka ”${name}”?`)) return;
+    const msg = y && y.stashId
+      ? `Poistetaanko lanka ”${name}” tästä työstä? Lanka säilyy lankavarastossa.`
+      : `Poistetaanko lanka ”${name}”?`;
+    if (name && !confirm(msg)) return;
     cur.yarns = cur.yarns.filter((i) => i.id !== el.dataset.id);
     save(true);
     refresh('yarns');
+  },
+
+  'link-yarn'(el) {
+    const y = cur.yarns.find((x) => x.id === el.dataset.id);
+    const st = stashById(el.dataset.stash);
+    if (!y || !st) return;
+    linkYarnToStash(y, st);
+    save(true);
+    refresh('yarns');
+  },
+  async 'yarn-to-stash'(el) {
+    const y = cur.yarns.find((x) => x.id === el.dataset.id);
+    if (!y) return;
+    const st = {
+      id: uid(), brand: y.brand, name: y.name, color: y.color, lot: y.lot, fiber: y.fiber, weight: y.weight || '',
+      metersPerSkein: y.metersPerSkein, gramsPerSkein: y.gramsPerSkein, skeins: y.skeinsOwned || '',
+      created: new Date().toISOString(),
+    };
+    await saveStash(st, true);
+    state.stash.push(st);
+    linkYarnToStash(y, st);
+    save(true);
+    refresh('yarns');
+    toast('Lisätty lankavarastoon');
+  },
+  async 'stash-add'() {
+    const s = {
+      id: uid(), brand: '', name: '', color: '', lot: '', fiber: '', weight: '',
+      metersPerSkein: '', gramsPerSkein: '', skeins: '', created: new Date().toISOString(),
+    };
+    await saveStash(s, true);
+    state.stash.push(s);
+    // uusi lanka listan alkuun auki, jotta lajittelu ei siirrä sitä kesken kirjoituksen
+    const list = document.getElementById('stashList');
+    if (state.stash.length === 1) list.innerHTML = '';
+    list.insertAdjacentHTML('afterbegin', stashItemHTML(s, true));
+    updateStashTotal();
+    list.querySelector(`[data-stash="${s.id}"]`)?.focus();
+  },
+  async 'stash-del'(el) {
+    const s = stashById(el.dataset.id);
+    if (!s) return;
+    const users = projectsNow().filter((p) => p.yarns.some((y) => y.stashId === s.id));
+    const msg = users.length
+      ? `Poistetaanko ”${stashTitle(s)}” lankavarastosta? Se on linkitetty ${users.length} työhön – töihin jäävät langan tiedot.`
+      : `Poistetaanko ”${stashTitle(s)}” lankavarastosta?`;
+    if (!confirm(msg)) return;
+    cancelItemSave('yarns', s.id);
+    await db.del('yarns', s.id);
+    state.stash = state.stash.filter((x) => x.id !== s.id);
+    for (const p of users) {
+      p.yarns.forEach((y) => {
+        if (y.stashId === s.id) {
+          Object.assign(y, stashFields(s), { stashId: null, skeinsOwned: '' });
+        }
+      });
+      await persist(p);
+    }
+    document.getElementById('stashList').innerHTML = stashListHTML();
+    updateStashTotal();
   },
 
   'add-tool'(el) {
@@ -902,8 +1223,7 @@ const actions = {
       ? `Poistetaanko ${TOOL_TYPES[it.type].toLowerCase()} ${invLabel(it)}? Ne on linkitetty ${users.length} työhön – töihin jää merkintä tarvittavasta koosta.`
       : `Poistetaanko ${TOOL_TYPES[it.type].toLowerCase()} ${invLabel(it)}?`;
     if (!confirm(msg)) return;
-    clearTimeout(invTimers.get(it.id));
-    invTimers.delete(it.id);
+    cancelItemSave('tools', it.id);
     await db.del('tools', it.id);
     state.inv = state.inv.filter((i) => i.id !== it.id);
     for (const p of users) {
@@ -947,6 +1267,7 @@ const actions = {
       exported: new Date().toISOString(),
       projects,
       tools: await db.all('tools'),
+      yarns: await db.all('yarns'),
       files: await Promise.all(
         files.map(async (f) => ({ id: f.id, name: f.name, type: f.type, data: await blobToDataURL(f.blob) }))
       ),
@@ -965,6 +1286,15 @@ const actions = {
     document.getElementById('importInput').click();
   },
 };
+
+function stashFields(s) {
+  const { brand, name, color, lot, fiber, weight, metersPerSkein, gramsPerSkein } = s;
+  return { brand, name, color, lot, fiber, weight, metersPerSkein, gramsPerSkein };
+}
+// Kopioidaan perustiedot työhön (haku ja korttinäkymä), varaston tiedot pysyvät määräävinä
+function linkYarnToStash(y, st) {
+  Object.assign(y, stashFields(st), { stashId: st.id, skeinsOwned: '' });
+}
 
 function blobToDataURL(blob) {
   return new Promise((resolve, reject) => {
@@ -1026,6 +1356,7 @@ document.getElementById('importInput').addEventListener('change', async (e) => {
     }
     for (const p of data.projects) await db.put('projects', normalize(p));
     for (const t of data.tools || []) await db.put('tools', t);
+    for (const y of data.yarns || []) await db.put('yarns', y);
     toast(`Tuotu ${data.projects.length} työtä`);
     route();
   } catch (err) {

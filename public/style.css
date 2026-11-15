@@ -305,3 +305,23 @@ textarea { resize: vertical; }
   .inv-fields .field:not(.size) { flex: 1 1 100%; order: 3; }
   .inv-fields .icon-btn { order: 2; }
 }
+
+/* ---------- Lankavarasto ---------- */
+.stash-total { margin: -6px 0 12px; font-weight: 600; }
+.stash-total:empty { display: none; }
+.stash-item { margin-bottom: 12px; padding: 0; }
+.stash-item > summary {
+  list-style: none; cursor: pointer; padding: 14px 16px;
+  display: flex; flex-direction: column; gap: 6px;
+}
+.stash-item > summary::-webkit-details-marker { display: none; }
+.stash-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }
+.stash-edit { flex: none; padding: 2px 10px; border: 1px solid var(--border); border-radius: 999px; }
+.stash-item[open] .stash-edit { visibility: hidden; }
+.stash-amount { font-size: 0.95rem; }
+.stash-fields { padding: 4px 16px 12px; border-top: 1px solid var(--border); padding-top: 14px; }
+.stash-actions { display: flex; justify-content: flex-end; }
+.item.linked { border-color: color-mix(in srgb, var(--accent) 35%, var(--border)); }
+.item .tool-status { margin-bottom: 8px; }
+.tabs a { padding: 8px 6px; white-space: nowrap; }
+.calc a { color: inherit; }

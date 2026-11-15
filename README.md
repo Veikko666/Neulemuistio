@@ -9,7 +9,12 @@ Tiedot ja kuvat tallentuvat **vain omalle laitteelle** (selaimen IndexedDB). Tun
 - **Kuvat työstä** – ensimmäinen kuva on kansikuva, isot kuvat pienennetään automaattisesti
 - **Ohje** – nimi, suunnittelija, linkki sekä ohjeen kuvat ja PDF:t
 - **Langat** – merkki, laatu, väri, värjäyserä, materiaali, m/kerä ja g/kerä
-- **Lankalaskuri** – ohjeen tarve metreinä, grammoina tai kerinä → montako kerää tarvitaan ja riittävätkö omat
+- **Lankavarasto** – omat langat (merkki, laatu, väri, erä, paksuus, materiaali, m/kerä, g/kerä, kerien määrä).
+  Näet kokonaismäärät sekä mitkä työt ovat varanneet langan ja paljonko on vapaana.
+- **Langat töissä** – valitse lanka varastosta tai syötä käsin; käsin syötetyn langan voi linkittää
+  varastoon tai lisätä sinne yhdellä napilla
+- **Lankalaskuri** – ohjeen tarve metreinä, grammoina tai kerinä → montako kerää tarvitaan ja riittääkö
+  varaston lanka, kun muiden keskeneräisten töiden varaukset huomioidaan
 - **Omat välineet** – oma sivu neulepuikoille, sukkapuikoille, pyöröpuikoille ja virkkuukoukuille
   (koko, pituus, materiaali). Näet, missä töissä kukin on käytössä ja mitkä ovat vapaana.
 - **Välineet töissä** – valitse omista tai merkitse ohjeen vaatima koko: sovellus kertoo omistatko sen,
