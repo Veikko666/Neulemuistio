@@ -1,6 +1,6 @@
-// Pieni IndexedDB-kääre: projektit ja tiedostot (kuvat, PDF:t) tallennetaan laitteelle.
+// Pieni IndexedDB-kääre: projektit, tiedostot (kuvat, PDF:t) ja omat välineet tallennetaan laitteelle.
 const DB_NAME = 'neulemuistio';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 let dbPromise;
 
 function open() {
@@ -11,8 +11,14 @@ function open() {
         const d = req.result;
         if (!d.objectStoreNames.contains('projects')) d.createObjectStore('projects', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('files')) d.createObjectStore('files', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('tools')) d.createObjectStore('tools', { keyPath: 'id' });
       };
-      req.onsuccess = () => resolve(req.result);
+      req.onsuccess = () => {
+        const d = req.result;
+        // Jos sovellus päivittyy toisessa välilehdessä, vapautetaan tietokanta päivitystä varten.
+        d.onversionchange = () => d.close();
+        resolve(d);
+      };
       req.onerror = () => reject(req.error);
     });
   }

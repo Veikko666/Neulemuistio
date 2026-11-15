@@ -1,5 +1,5 @@
 // Offline-tuki: verkko ensin, välimuisti varalla.
-const CACHE = 'neulemuistio-v1';
+const CACHE = 'neulemuistio-v2';
 const ASSETS = ['./', './index.html', './style.css', './app.js', './db.js',
   './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
 

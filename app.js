@@ -8,7 +8,7 @@ const STATUSES = {
   valmis: 'Valmis',
 };
 const TOOL_TYPES = {
-  puikot: 'Puikot',
+  puikot: 'Neulepuikot',
   pyoropuikot: 'Pyöröpuikot',
   sukkapuikot: 'Sukkapuikot',
   koukku: 'Virkkuukoukku',
@@ -16,10 +16,13 @@ const TOOL_TYPES = {
   muu: 'Muu väline',
 };
 const NEED_UNITS = { m: 'metriä', g: 'grammaa', k: 'kerää' };
+// Välinetyypit, joita voi tallentaa omiin välineisiin
+const INV_TYPES = ['puikot', 'sukkapuikot', 'pyoropuikot', 'koukku'];
+const INV_LABELS = { puikot: 'Neulepuikot', sukkapuikot: 'Sukkapuikot', pyoropuikot: 'Pyöröpuikot', koukku: 'Virkkuukoukut' };
 
 // ---------- Tila ----------
 const app = document.getElementById('app');
-const state = { filter: 'kaikki', search: '', projects: [] };
+const state = { filter: 'kaikki', search: '', projects: [], inv: [], allProjects: [] };
 let cur = null; // avoinna oleva työ
 let saveTimer = null;
 
@@ -135,6 +138,46 @@ async function storeFiles(fileList) {
   return out;
 }
 
+// ---------- Omat välineet ----------
+const withUnit = (v, unit) => {
+  const s = String(v ?? '').trim();
+  return /^\d+([.,]\d+)?$/.test(s) ? `${s} ${unit}` : s;
+};
+function invLabel(it) {
+  return [withUnit(it.size, 'mm'), withUnit(it.length, 'cm'), it.material].filter(Boolean).join(', ') || 'koko puuttuu';
+}
+async function loadInv() {
+  state.inv = await db.all('tools');
+}
+// Kaikki työt, avoinna olevasta käytetään muokattua versiota
+function projectsNow() {
+  return state.allProjects.map((p) => (cur && p.id === cur.id ? cur : p));
+}
+function projectsUsing(invId) {
+  return projectsNow().filter((p) => p.tools.some((t) => t.inventoryId === invId));
+}
+const sameSize = (a, b) => num(a) !== null && num(a) === num(b);
+
+const invTimers = new Map();
+function saveInv(it, now = false) {
+  clearTimeout(invTimers.get(it.id));
+  if (now) {
+    invTimers.delete(it.id);
+    return db.put('tools', it);
+  }
+  invTimers.set(it.id, setTimeout(() => {
+    invTimers.delete(it.id);
+    db.put('tools', it);
+  }, 400));
+}
+function flushInv() {
+  const pending = [...invTimers.keys()];
+  return Promise.all(pending.map((id) => {
+    const it = state.inv.find((i) => i.id === id);
+    return it ? saveInv(it, true) : null;
+  }));
+}
+
 // ---------- Tallennus ----------
 async function persist(p) {
   p.updated = new Date().toISOString();
@@ -160,8 +203,7 @@ function save(now = false) {
   }, 400);
 }
 function flush() {
-  if (saveTimer && cur) return save(true);
-  return Promise.resolve();
+  return Promise.all([saveTimer && cur ? save(true) : null, flushInv()]);
 }
 document.addEventListener('visibilitychange', () => document.visibilityState === 'hidden' && flush());
 window.addEventListener('pagehide', flush);
@@ -224,6 +266,7 @@ async function route() {
   await flush();
   const m = location.hash.match(/^#\/p\/([\w-]+)/);
   if (m) await showProject(m[1]);
+  else if (location.hash.startsWith('#/valineet')) await showInventory();
   else await showList();
   window.scrollTo(0, 0);
 }
@@ -250,6 +293,7 @@ async function showList() {
       <h1><img src="icon.svg" alt="" class="logo"> Neulemuistio</h1>
       <button class="btn primary" data-action="new">+ Uusi työ</button>
     </header>
+    ${navHTML('list')}
     ${state.projects.length ? `
     <div class="toolbar">
       <input type="search" id="search" placeholder="Hae nimellä, langalla, ohjeella…" value="${esc(state.search)}">
@@ -265,6 +309,12 @@ async function showList() {
     </footer>`;
   renderGrid();
 }
+
+const navHTML = (active) => `
+  <nav class="tabs">
+    <a href="#/" class="${active === 'list' ? 'on' : ''}">🧶 Työt</a>
+    <a href="#/valineet" class="${active === 'inv' ? 'on' : ''}">🪡 Omat välineet</a>
+  </nav>`;
 
 function renderGrid() {
   const grid = document.getElementById('grid');
@@ -312,6 +362,8 @@ async function showProject(id) {
     location.hash = '#/';
     return;
   }
+  await loadInv();
+  state.allProjects = (await db.all('projects')).map(normalize);
   cur = normalize(p);
   document.title = (cur.name || 'Nimetön työ') + ' – Neulemuistio';
   app.innerHTML = detailHTML(cur);
@@ -373,8 +425,10 @@ function detailHTML(p) {
       <section class="panel">
         <h2>🪡 Puikot, koukut ja merkit</h2>
         <div data-section="tools">${toolsHTML(p)}</div>
+        <div data-section="toolPicker">${toolPickerHTML(p)}</div>
+        <p class="muted small-text add-label">Tai merkitse tarvittava väline:</p>
         <div class="quick-add">
-          <button class="btn small" data-action="add-tool" data-type="puikot">+ Puikot</button>
+          <button class="btn small" data-action="add-tool" data-type="puikot">+ Neulepuikot</button>
           <button class="btn small" data-action="add-tool" data-type="pyoropuikot">+ Pyöröpuikot</button>
           <button class="btn small" data-action="add-tool" data-type="sukkapuikot">+ Sukkapuikot</button>
           <button class="btn small" data-action="add-tool" data-type="koukku">+ Koukku</button>
@@ -465,18 +519,144 @@ function yarnsHTML(p) {
 }
 
 function toolsHTML(p) {
-  if (!p.tools.length) return '<p class="muted">Lisää työssä käytetyt välineet alla olevista painikkeista.</p>';
-  return `<div class="tool-list">${p.tools
-    .map(
-      (t) => `
+  if (!p.tools.length) return '<p class="muted">Valitse välineet omista tai merkitse ohjeen vaatimat välineet alta.</p>';
+  return `<div class="tool-list">${p.tools.map((t) => toolRowHTML(t)).join('')}</div>`;
+}
+
+function toolRowHTML(t) {
+  const it = t.inventoryId && state.inv.find((i) => i.id === t.inventoryId);
+  const del = `<button class="icon-btn" data-action="del-tool" data-id="${t.id}" title="Poista työstä" aria-label="Poista väline työstä">✕</button>`;
+  const status = `<div class="tool-status" data-tstatus="${t.id}">${toolStatusHTML(t)}</div>`;
+  if (it) {
+    return `
+      <div class="tool-wrap">
+        <div class="tool linked">
+          <div class="tool-name"><strong>${esc(TOOL_TYPES[it.type])}</strong> ${esc(invLabel(it))}</div>
+          <input data-list="tools" data-id="${t.id}" data-key="detail" value="${esc(t.detail)}" placeholder="Huomio, esim. resoriin" aria-label="Huomio">
+          ${del}
+        </div>
+        ${status}
+      </div>`;
+  }
+  return `
+    <div class="tool-wrap">
       <div class="tool">
         <select data-list="tools" data-id="${t.id}" data-key="type" aria-label="Väline">${opts(TOOL_TYPES, t.type)}</select>
-        <input data-list="tools" data-id="${t.id}" data-key="size" value="${esc(t.size)}" placeholder="${t.type === 'merkit' ? 'Määrä / väri' : 'Koko, esim. 3,5 mm'}" aria-label="Koko">
+        <input data-list="tools" data-id="${t.id}" data-key="size" value="${esc(t.size)}" placeholder="${t.type === 'merkit' ? 'Määrä / väri' : 'Koko, esim. 3,5 mm'}" aria-label="Koko" ${t.type === 'merkit' || t.type === 'muu' ? '' : 'inputmode="decimal"'}>
         <input data-list="tools" data-id="${t.id}" data-key="detail" value="${esc(t.detail)}" placeholder="${t.type === 'pyoropuikot' ? 'Pituus, esim. 80 cm' : 'Lisätieto'}" aria-label="Lisätieto">
-        <button class="icon-btn" data-action="del-tool" data-id="${t.id}" title="Poista" aria-label="Poista väline">✕</button>
-      </div>`
-    )
-    .join('')}</div>`;
+        ${del}
+      </div>
+      ${status}
+    </div>`;
+}
+
+function otherUsers(invId) {
+  return projectsUsing(invId).filter((p) => p.id !== cur?.id && p.status === 'kesken');
+}
+const projLinks = (list) =>
+  list.map((p) => `<a href="#/p/${p.id}">${esc(p.name || 'Nimetön työ')}</a>`).join(', ');
+
+function toolStatusHTML(t) {
+  if (!INV_TYPES.includes(t.type)) return '';
+  if (t.inventoryId) {
+    const it = state.inv.find((i) => i.id === t.inventoryId);
+    if (!it) return '<span class="warn">✗ Linkitetty väline on poistettu omista välineistä</span>';
+    const others = otherUsers(it.id);
+    return '<span class="ok">✓ Omistat</span>' +
+      (others.length ? ` <span class="caution">· käytössä myös: ${projLinks(others)}</span>` : '');
+  }
+  if (num(t.size) === null) return '<span class="muted">Syötä koko, niin tarkistan löytyykö se omista välineistä.</span>';
+  const match = state.inv
+    .filter((i) => i.type === t.type && sameSize(i.size, t.size))
+    .sort((a, b) => otherUsers(a.id).length - otherUsers(b.id).length)[0];
+  if (match) {
+    const others = otherUsers(match.id);
+    return `<span class="ok">✓ Sinulla on nämä</span>` +
+      (others.length ? ` <span class="caution">(käytössä: ${projLinks(others)})</span>` : '') +
+      ` <button class="btn tiny" data-action="link-tool" data-id="${t.id}" data-inv="${match.id}">Linkitä</button>`;
+  }
+  return `<span class="warn">✗ Ei omissa välineissä</span>
+    <button class="btn tiny" data-action="tool-to-inv" data-id="${t.id}" title="Merkitse, että omistat tämän välineen">+ Lisää omiin</button>`;
+}
+
+function toolPickerHTML(p) {
+  if (!state.inv.length) {
+    return '<p class="muted small-text">Vinkki: tallenna omat puikkosi ja koukkusi <a href="#/valineet">Omat välineet</a> -sivulle, niin voit valita ne suoraan tähän.</p>';
+  }
+  const linked = new Set(p.tools.map((t) => t.inventoryId).filter(Boolean));
+  const groups = INV_TYPES.map((type) => {
+    const items = state.inv
+      .filter((i) => i.type === type && !linked.has(i.id))
+      .sort((a, b) => (num(a.size) ?? 999) - (num(b.size) ?? 999));
+    if (!items.length) return '';
+    return `<optgroup label="${esc(INV_LABELS[type])}">${items
+      .map((i) => {
+        const others = otherUsers(i.id);
+        return `<option value="${i.id}">${esc(invLabel(i))}${others.length ? ` (käytössä: ${esc(others.map((o) => o.name || 'Nimetön työ').join(', '))})` : ''}</option>`;
+      })
+      .join('')}</optgroup>`;
+  }).join('');
+  if (!groups) return '';
+  return `<select id="toolPicker" class="picker" aria-label="Valitse omista välineistä">
+      <option value="">+ Valitse omista välineistä…</option>${groups}
+    </select>`;
+}
+
+// ---------- Omat välineet -näkymä ----------
+async function showInventory() {
+  cur = null;
+  document.title = 'Omat välineet – Neulemuistio';
+  await loadInv();
+  state.allProjects = (await db.all('projects')).map(normalize);
+  app.innerHTML = `
+    <header class="topbar">
+      <h1><img src="icon.svg" alt="" class="logo"> Neulemuistio</h1>
+    </header>
+    ${navHTML('inv')}
+    <p class="muted intro">Tallenna tänne omistamasi puikot ja koukut. Töissä voit valita ne käyttöön, ja näet heti mitkä ovat vapaana ja mitä puuttuu.</p>
+    ${INV_TYPES.map((type) => `
+      <section class="panel inv-panel">
+        <div class="panel-head">
+          <h2>${esc(INV_LABELS[type])} <span class="count" data-count="${type}"></span></h2>
+          <button class="btn small" data-action="inv-add" data-type="${type}">+ Lisää</button>
+        </div>
+        <div data-inv-section="${type}">${invListHTML(type)}</div>
+      </section>`).join('')}`;
+  updateCounts();
+}
+
+function updateCounts() {
+  INV_TYPES.forEach((type) => {
+    const el = app.querySelector(`[data-count="${type}"]`);
+    const n = state.inv.filter((i) => i.type === type).length;
+    if (el) el.textContent = n ? `(${n})` : '';
+  });
+}
+
+function invListHTML(type) {
+  const items = state.inv
+    .filter((i) => i.type === type)
+    .sort((a, b) => (num(a.size) ?? 999) - (num(b.size) ?? 999) || (num(a.length) ?? 0) - (num(b.length) ?? 0));
+  if (!items.length) return '<p class="muted">Ei vielä yhtään.</p>';
+  const lengthLabel = type === 'pyoropuikot' ? 'Pituus (cm)' : 'Pituus (cm)';
+  return items.map((it) => `
+    <div class="inv-item">
+      <div class="inv-fields">
+        <label class="field size"><span>Koko (mm)</span><input data-inv="${it.id}" data-key="size" value="${esc(it.size)}" inputmode="decimal" placeholder="3,5"></label>
+        ${type !== 'koukku' ? `<label class="field size"><span>${lengthLabel}</span><input data-inv="${it.id}" data-key="length" value="${esc(it.length)}" inputmode="decimal" placeholder="${type === 'pyoropuikot' ? '80' : type === 'sukkapuikot' ? '20' : '35'}"></label>` : ''}
+        <label class="field"><span>Materiaali / merkki</span><input data-inv="${it.id}" data-key="material" value="${esc(it.material)}" placeholder="esim. bambu, KnitPro"></label>
+        <button class="icon-btn" data-action="inv-del" data-id="${it.id}" title="Poista omista välineistä" aria-label="Poista väline">✕</button>
+      </div>
+      <div class="inv-usage">${invUsageHTML(it)}</div>
+    </div>`).join('');
+}
+
+function invUsageHTML(it) {
+  const users = projectsUsing(it.id).filter((p) => p.status !== 'valmis');
+  if (!users.length) return '<span class="ok">Vapaana</span>';
+  return users
+    .map((p) => `<a class="use-chip s-${p.status}" href="#/p/${p.id}">${esc(p.name || 'Nimetön työ')} · ${STATUSES[p.status]}</a>`)
+    .join(' ');
 }
 
 function notesHTML(p) {
@@ -499,9 +679,13 @@ function notesHTML(p) {
 function refresh(section) {
   const el = app.querySelector(`[data-section="${section}"]`);
   if (!el || !cur) return;
-  const render = { photos: photosHTML, patternFiles: patternFilesHTML, yarns: yarnsHTML, tools: toolsHTML, notes: notesHTML }[section];
+  const render = { toolPicker: toolPickerHTML, photos: photosHTML, patternFiles: patternFilesHTML, yarns: yarnsHTML, tools: toolsHTML, notes: notesHTML }[section];
   el.innerHTML = render(cur);
   hydrate(el);
+  if (section === 'tools') {
+    const picker = app.querySelector('[data-section="toolPicker"]');
+    if (picker) picker.innerHTML = toolPickerHTML(cur);
+  }
 }
 
 // ---------- Syötteet ----------
@@ -510,6 +694,14 @@ app.addEventListener('input', (e) => {
   if (el.id === 'search') {
     state.search = el.value;
     renderGrid();
+    return;
+  }
+  if (el.dataset.inv) {
+    const it = state.inv.find((i) => i.id === el.dataset.inv);
+    if (it) {
+      it[el.dataset.key] = el.value;
+      saveInv(it);
+    }
     return;
   }
   if (!cur) return;
@@ -539,12 +731,26 @@ app.addEventListener('input', (e) => {
       const calc = app.querySelector(`[data-calc="${item.id}"]`);
       if (calc) calc.innerHTML = yarnCalcHTML(item);
     }
-    if (el.dataset.list === 'tools' && el.dataset.key === 'type') {
-      // päivitä vihjetekstit uuden välinetyypin mukaan
-      refresh('tools');
+    if (el.dataset.list === 'tools') {
+      if (el.dataset.key === 'type') {
+        // päivitä vihjetekstit uuden välinetyypin mukaan
+        refresh('tools');
+      } else {
+        const st = app.querySelector(`[data-tstatus="${item.id}"]`);
+        if (st) st.innerHTML = toolStatusHTML(item);
+      }
     }
     save();
   }
+});
+
+app.addEventListener('change', (e) => {
+  if (e.target.id !== 'toolPicker' || !cur) return;
+  const it = state.inv.find((i) => i.id === e.target.value);
+  if (!it) return;
+  cur.tools.push({ id: uid(), type: it.type, size: it.size, detail: '', inventoryId: it.id });
+  save(true);
+  refresh('tools');
 });
 
 app.addEventListener('keydown', (e) => {
@@ -650,6 +856,68 @@ const actions = {
     save(true);
     refresh('tools');
   },
+  'link-tool'(el) {
+    const t = cur.tools.find((x) => x.id === el.dataset.id);
+    const it = state.inv.find((i) => i.id === el.dataset.inv);
+    if (!t || !it) return;
+    t.inventoryId = it.id;
+    t.type = it.type;
+    t.size = it.size;
+    save(true);
+    refresh('tools');
+  },
+  async 'tool-to-inv'(el) {
+    const t = cur.tools.find((x) => x.id === el.dataset.id);
+    if (!t) return;
+    const length = t.type !== 'koukku' ? (String(t.detail || '').match(/\d+([.,]\d+)?/) || [''])[0] : '';
+    const it = { id: uid(), type: t.type, size: t.size, length, material: '', created: new Date().toISOString() };
+    await saveInv(it, true);
+    state.inv.push(it);
+    t.inventoryId = it.id;
+    save(true);
+    refresh('tools');
+    toast('Lisätty omiin välineisiin');
+  },
+  async 'inv-add'(el) {
+    const type = el.dataset.type;
+    const it = { id: uid(), type, size: '', length: '', material: '', created: new Date().toISOString() };
+    await saveInv(it, true);
+    state.inv.push(it);
+    // uusi rivi listan loppuun, jotta lajittelu ei siirrä sitä kesken kirjoituksen
+    const sec = app.querySelector(`[data-inv-section="${type}"]`);
+    const tmp = document.createElement('div');
+    const html = invListHTML(type);
+    tmp.innerHTML = html;
+    const newRow = [...tmp.querySelectorAll('.inv-item')].find((r) => r.querySelector(`[data-inv="${it.id}"]`));
+    if (sec.querySelector('.inv-item')) sec.appendChild(newRow);
+    else sec.innerHTML = html;
+    updateCounts();
+    sec.querySelector(`[data-inv="${it.id}"]`)?.focus();
+  },
+  async 'inv-del'(el) {
+    const it = state.inv.find((i) => i.id === el.dataset.id);
+    if (!it) return;
+    const users = projectsUsing(it.id);
+    const msg = users.length
+      ? `Poistetaanko ${TOOL_TYPES[it.type].toLowerCase()} ${invLabel(it)}? Ne on linkitetty ${users.length} työhön – töihin jää merkintä tarvittavasta koosta.`
+      : `Poistetaanko ${TOOL_TYPES[it.type].toLowerCase()} ${invLabel(it)}?`;
+    if (!confirm(msg)) return;
+    clearTimeout(invTimers.get(it.id));
+    invTimers.delete(it.id);
+    await db.del('tools', it.id);
+    state.inv = state.inv.filter((i) => i.id !== it.id);
+    for (const p of users) {
+      p.tools.forEach((t) => {
+        if (t.inventoryId === it.id) {
+          t.inventoryId = null;
+          t.size = t.size || it.size;
+        }
+      });
+      await persist(p);
+    }
+    app.querySelector(`[data-inv-section="${it.type}"]`).innerHTML = invListHTML(it.type);
+    updateCounts();
+  },
 
   'add-note'() {
     const ta = document.getElementById('noteText');
@@ -678,6 +946,7 @@ const actions = {
       version: 1,
       exported: new Date().toISOString(),
       projects,
+      tools: await db.all('tools'),
       files: await Promise.all(
         files.map(async (f) => ({ id: f.id, name: f.name, type: f.type, data: await blobToDataURL(f.blob) }))
       ),
@@ -756,8 +1025,9 @@ document.getElementById('importInput').addEventListener('change', async (e) => {
       await db.put('files', { id: f.id, name: f.name, type: f.type, blob });
     }
     for (const p of data.projects) await db.put('projects', normalize(p));
+    for (const t of data.tools || []) await db.put('tools', t);
     toast(`Tuotu ${data.projects.length} työtä`);
-    showList();
+    route();
   } catch (err) {
     alert('Tuonti epäonnistui: ' + err.message);
   }

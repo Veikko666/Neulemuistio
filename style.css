@@ -253,3 +253,55 @@ textarea { resize: vertical; }
   .gallery { grid-template-columns: repeat(3, 1fr); }
   .footer { flex-direction: column; align-items: flex-start; }
 }
+
+/* ---------- Välilehdet ---------- */
+.tabs {
+  display: flex; gap: 4px; padding: 4px; margin-bottom: 16px;
+  background: var(--surface-2); border-radius: 999px;
+}
+.tabs a {
+  flex: 1; text-align: center; padding: 8px 12px; border-radius: 999px;
+  color: var(--muted); font-weight: 600; text-decoration: none;
+}
+.tabs a.on { background: var(--surface); color: var(--text); box-shadow: var(--shadow); }
+.intro { margin: 0 0 16px; }
+
+/* ---------- Välineet työssä ---------- */
+.tool-wrap { display: flex; flex-direction: column; gap: 4px; }
+.tool-wrap + .tool-wrap { padding-top: 8px; border-top: 1px solid var(--border); }
+.tool.linked { grid-template-columns: minmax(150px, 1.4fr) 1.6fr auto; }
+.tool-name { padding: 0 4px; }
+.tool-status { font-size: 0.85rem; padding: 0 4px; display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; }
+.tool-status:empty { display: none; }
+.tool-status a { color: inherit; }
+.caution { color: #a86a12; }
+@media (prefers-color-scheme: dark) { .caution { color: #f0b860; } }
+.btn.tiny { min-height: 28px; padding: 2px 10px; font-size: 0.8rem; }
+.picker { margin-bottom: 4px; font-weight: 600; color: var(--accent); }
+.add-label { margin: 10px 0 6px !important; }
+
+/* ---------- Omat välineet ---------- */
+.inv-panel { margin-bottom: 16px; }
+.count { color: var(--muted); font-weight: 500; font-size: 0.95rem; }
+.inv-item { padding: 10px 0; border-top: 1px solid var(--border); }
+.inv-item:first-child { border-top: none; padding-top: 0; }
+.inv-fields { display: flex; gap: 8px; align-items: flex-end; }
+.inv-fields .field { flex: 1 1 0; }
+.inv-fields .field.size { flex: 0 0 96px; }
+.inv-fields .icon-btn { margin-bottom: 3px; }
+.inv-usage { margin-top: 6px; font-size: 0.85rem; display: flex; flex-wrap: wrap; gap: 6px; }
+.use-chip {
+  padding: 2px 10px; border-radius: 999px; text-decoration: none; font-weight: 600;
+  background: var(--surface-2); color: var(--text);
+}
+.use-chip.s-kesken { background: var(--accent-soft); color: var(--accent); }
+
+@media (max-width: 560px) {
+  .tool.linked { grid-template-columns: 1fr auto; }
+  .tool.linked input { grid-column: 1 / 3; grid-row: 2; }
+  .tool.linked .icon-btn { grid-column: 2; grid-row: 1; }
+  .inv-fields { flex-wrap: wrap; }
+  .inv-fields .field.size { flex: 1 1 80px; }
+  .inv-fields .field:not(.size) { flex: 1 1 100%; order: 3; }
+  .inv-fields .icon-btn { order: 2; }
+}
