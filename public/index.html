@@ -18,10 +18,14 @@
 
   <div id="lightbox" hidden data-action="close-lightbox"><img alt=""></div>
   <div id="toast" role="status" hidden></div>
+  <div id="sheet" hidden>
+    <div class="sheet-backdrop" data-action="close-sheet"></div>
+    <div class="sheet-body" role="dialog" aria-modal="true"></div>
+  </div>
 
   <input type="file" id="photoInput" accept="image/*" multiple hidden>
   <input type="file" id="patternInput" accept="image/*,application/pdf" multiple hidden>
-  <input type="file" id="importInput" accept="application/json,.json" hidden>
+  <input type="file" id="importInput" accept="application/json,.json,text/plain,.txt" hidden>
 
   <script type="module" src="app.js"></script>
 </body>

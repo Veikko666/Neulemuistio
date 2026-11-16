@@ -374,7 +374,7 @@ async function showList() {
     </div>` : ''}
     <section id="grid" class="grid"></section>
     <footer class="footer">
-      <p class="muted">Tiedot tallentuvat vain tälle laitteelle. Ota välillä varmuuskopio.</p>
+      <p class="muted">Tiedot tallentuvat vain tälle laitteelle. ${backupStatusHTML()}</p>
       <div>
         <button class="btn ghost small" data-action="export">Vie varmuuskopio</button>
         <button class="btn ghost small" data-action="import">Tuo varmuuskopio</button>
@@ -1259,28 +1259,67 @@ const actions = {
   },
 
   async export() {
+    toast('Valmistellaan varmuuskopiota…');
     const projects = await db.all('projects');
     const files = await db.all('files');
+    const tools = await db.all('tools');
+    const yarns = await db.all('yarns');
     const data = {
       app: 'neulemuistio',
       version: 1,
       exported: new Date().toISOString(),
       projects,
-      tools: await db.all('tools'),
-      yarns: await db.all('yarns'),
+      tools,
+      yarns,
       files: await Promise.all(
         files.map(async (f) => ({ id: f.id, name: f.name, type: f.type, data: await blobToDataURL(f.blob) }))
       ),
     };
-    const blob = new Blob([JSON.stringify(data)], { type: 'application/json' });
+    const json = JSON.stringify(data);
+    const date = new Date().toISOString().slice(0, 10);
+    // Android-jako ei hyväksy .json-tiedostoja, joten jaettava tiedosto on tekstitiedosto.
+    const shareFile = new File([json], `neulemuistio-varmuuskopio-${date}.txt`, { type: 'text/plain' });
+    state.backup = { json, date, shareFile };
+    const canShare = !!(navigator.canShare && navigator.canShare({ files: [shareFile] }));
+    const size = json.length > 1e6 ? `${fmt(json.length / 1e6, 1)} Mt` : `${fmt(Math.max(1, json.length / 1e3))} kt`;
+    document.getElementById('toast').hidden = true;
+    openSheet(`
+      <h2>Varmuuskopio valmis</h2>
+      <p class="muted">${projects.length} ${projects.length === 1 ? 'työ' : 'työtä'}, ${yarns.length} ${yarns.length === 1 ? 'lanka' : 'lankaa'},
+        ${tools.length} ${tools.length === 1 ? 'väline' : 'välinettä'}, ${files.length} ${files.length === 1 ? 'kuva' : 'kuvaa'} · ${size}</p>
+      ${canShare ? `
+        <button class="btn primary block" data-action="share-backup">Tallenna Driveen tai jaa…</button>
+        <p class="muted small-text">Valitse avautuvasta valikosta esim. Drive, niin varmuuskopio tallentuu pilveen.</p>` : ''}
+      <button class="btn ${canShare ? '' : 'primary'} block" data-action="download-backup">Lataa tiedostona</button>
+      <button class="btn ghost block" data-action="close-sheet">Sulje</button>`);
+  },
+  async 'share-backup'() {
+    const b = state.backup;
+    if (!b) return;
+    try {
+      await navigator.share({ files: [b.shareFile], title: 'Neulemuistion varmuuskopio' });
+      backupDone();
+      toast('Varmuuskopio tallennettu');
+    } catch (err) {
+      if (err.name === 'AbortError') return; // käyttäjä perui
+      toast('Jakaminen ei onnistunut – lataa tiedostona');
+    }
+  },
+  'download-backup'() {
+    const b = state.backup;
+    if (!b) return;
     const a = document.createElement('a');
-    a.href = URL.createObjectURL(blob);
-    a.download = `neulemuistio-${new Date().toISOString().slice(0, 10)}.json`;
+    a.href = URL.createObjectURL(new Blob([b.json], { type: 'application/json' }));
+    a.download = `neulemuistio-${b.date}.json`;
     document.body.appendChild(a);
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(a.href), 10000);
+    backupDone();
     toast('Varmuuskopio ladattu');
+  },
+  'close-sheet'() {
+    closeSheet();
   },
   import() {
     document.getElementById('importInput').click();
@@ -1294,6 +1333,36 @@ function stashFields(s) {
 // Kopioidaan perustiedot työhön (haku ja korttinäkymä), varaston tiedot pysyvät määräävinä
 function linkYarnToStash(y, st) {
   Object.assign(y, stashFields(st), { stashId: st.id, skeinsOwned: '' });
+}
+
+// ---------- Alapaneeli ja varmuuskopion muistutus ----------
+function openSheet(html) {
+  const sh = document.getElementById('sheet');
+  sh.querySelector('.sheet-body').innerHTML = html;
+  sh.hidden = false;
+}
+function closeSheet() {
+  document.getElementById('sheet').hidden = true;
+}
+function backupDone() {
+  try {
+    localStorage.setItem('lastBackup', new Date().toISOString());
+  } catch {}
+  closeSheet();
+  const f = document.querySelector('.footer p');
+  if (f) f.innerHTML = 'Tiedot tallentuvat vain tälle laitteelle. ' + backupStatusHTML();
+}
+function backupStatusHTML() {
+  let last = null;
+  try {
+    last = localStorage.getItem('lastBackup');
+  } catch {}
+  if (!last) return '<span class="caution">Varmuuskopiota ei ole vielä otettu.</span>';
+  const days = Math.floor((Date.now() - new Date(last)) / 864e5);
+  const when = days === 0 ? 'tänään' : days === 1 ? 'eilen' : `${days} päivää sitten`;
+  return days > 14
+    ? `<span class="caution">Viimeisin varmuuskopio ${when} – ota uusi.</span>`
+    : `Viimeisin varmuuskopio ${when}.`;
 }
 
 function blobToDataURL(blob) {
@@ -1317,7 +1386,10 @@ document.addEventListener('click', (e) => {
   });
 });
 document.addEventListener('keydown', (e) => {
-  if (e.key === 'Escape') document.getElementById('lightbox').hidden = true;
+  if (e.key === 'Escape') {
+    document.getElementById('lightbox').hidden = true;
+    closeSheet();
+  }
 });
 
 // ---------- Tiedostovalinnat ----------
