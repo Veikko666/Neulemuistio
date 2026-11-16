@@ -1,0 +1,12 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "fi.promptly.neule",
+      "sha256_cert_fingerprints": [
+        "6E:AF:C0:B1:57:DE:A8:CF:91:F7:50:D1:43:98:8E:93:03:81:C6:38:A1:EB:64:33:08:0E:E8:46:58:5D:FB:AE"
+      ]
+    }
+  }
+]

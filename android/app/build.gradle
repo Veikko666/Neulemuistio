@@ -1,0 +1,48 @@
+plugins {
+    id 'com.android.application'
+}
+
+// Allekirjoitusavain pidetään repon ulkopuolella (android-avain/, ei versionhallinnassa).
+def signingProps = new Properties()
+def signingFile = rootProject.file('../android-avain/signing.properties')
+if (signingFile.exists()) signingFile.withInputStream { signingProps.load(it) }
+
+android {
+    namespace 'fi.promptly.neule'
+    compileSdk 35
+
+    defaultConfig {
+        applicationId 'fi.promptly.neule'
+        minSdk 21
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+
+    signingConfigs {
+        release {
+            if (signingFile.exists()) {
+                storeFile file(signingProps['storeFile'])
+                storePassword signingProps['storePassword']
+                keyAlias signingProps['keyAlias']
+                keyPassword signingProps['keyPassword']
+            }
+        }
+    }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig signingConfigs.release
+        }
+    }
+
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_17
+        targetCompatibility JavaVersion.VERSION_17
+    }
+}
+
+dependencies {
+    implementation 'com.google.androidbrowserhelper:androidbrowserhelper:2.5.0'
+}

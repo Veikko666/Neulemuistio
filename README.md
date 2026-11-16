@@ -54,3 +54,21 @@ Sen jälkeen sovellus toimii myös offline.
 | `public/style.css` | Ulkoasu (vaalea ja tumma teema) |
 | `public/sw.js`, `public/manifest.webmanifest` | Offline-tuki ja asennettavuus |
 | `wrangler.jsonc` | Cloudflare-julkaisun asetukset |
+
+## Android-sovellus
+
+`android/` sisältää Android-sovelluksen (Trusted Web Activity), joka avaa osoitteen
+https://neule.promptly.fi koko näytön sovelluksena. Tiedot ovat samat kuin Chromessa samassa osoitteessa.
+
+- Paketti: `fi.promptly.neule`
+- Sovelluksen allekirjoituksen tunniste on `public/.well-known/assetlinks.json`:ssa. Ilman sitä sovellus näyttää osoiterivin.
+- Allekirjoitusavain (`android-avain/`) **ei ole versionhallinnassa**. Säilytä se turvassa: päivitykset
+  pitää allekirjoittaa samalla avaimella.
+
+Rakentaminen (Android SDK ja JDK 17+):
+
+```sh
+cd android
+echo "sdk.dir=/polku/android-sdk" > local.properties
+gradle assembleRelease   # → app/build/outputs/apk/release/app-release.apk
+```
