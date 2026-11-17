@@ -340,3 +340,38 @@ textarea { resize: vertical; }
 .sheet-body p { margin: 0; }
 .btn.block { width: 100%; }
 @media (min-width: 561px) { #sheet { align-items: center; } .sheet-body { border-radius: 20px; } }
+
+/* ---------- Opi neulomaan ---------- */
+.opi-progress { display: flex; align-items: center; gap: 12px; margin-bottom: 16px; font-weight: 600; font-size: 0.9rem; }
+.opi-bar { flex: 1; height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.opi-bar span { display: block; height: 100%; background: var(--accent); border-radius: 999px; transition: width 0.3s ease; }
+.opi-list { list-style: none; margin: 0 0 16px; padding: 0; display: flex; flex-direction: column; gap: 10px; }
+.opi-lesson { padding: 0; scroll-margin-top: 80px; }
+.opi-lesson summary { list-style: none; cursor: pointer; padding: 14px 16px; display: flex; align-items: center; gap: 12px; }
+.opi-lesson summary::-webkit-details-marker { display: none; }
+.opi-num {
+  flex: none; width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--accent-soft); color: var(--accent); font-weight: 700;
+}
+.opi-lesson.done .opi-num { background: color-mix(in srgb, var(--ok) 18%, transparent); color: var(--ok); }
+.opi-title { display: flex; flex-direction: column; min-width: 0; }
+.opi-title small { font-size: 0.8rem; }
+.opi-body { padding: 0 16px 16px; border-top: 1px solid var(--border); }
+.opi-body p, .opi-body ul, .opi-body ol { margin: 12px 0 0; }
+.opi-body li { margin-bottom: 6px; }
+.opi-tip { padding: 10px 12px; border-radius: 10px; background: var(--accent-soft); font-size: 0.95rem; }
+.opi-tip::before { content: '💡 '; }
+.opi-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 8px; margin-top: 16px; }
+.opi-svg { display: block; width: 100%; max-width: 320px; margin: 12px auto 0; color: var(--accent); }
+.opi-svg text { fill: var(--muted); font: 600 14px system-ui, sans-serif; }
+.opi-table { width: 100%; border-collapse: collapse; margin-top: 12px; font-size: 0.95rem; }
+.opi-table th, .opi-table td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); vertical-align: top; }
+.opi-table th { white-space: nowrap; color: var(--accent); width: 1%; }
+.opi-res h2 { margin-bottom: 4px; }
+.opi-res-item { padding: 12px 0; border-top: 1px solid var(--border); }
+.opi-res-item:first-of-type { border-top: none; }
+.opi-res-item h3 { color: var(--text); font-size: 1rem; }
+.opi-res-item p { margin: 4px 0 0; }
+.opi-links { display: flex; flex-wrap: wrap; gap: 6px 16px; font-weight: 600; }
+.opi-links a { color: var(--accent); }

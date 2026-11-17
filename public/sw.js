@@ -1,6 +1,6 @@
 // Offline-tuki: verkko ensin, välimuisti varalla.
-const CACHE = 'neulemuistio-v4';
-const ASSETS = ['./', './index.html', './style.css', './app.js', './db.js',
+const CACHE = 'neulemuistio-v5';
+const ASSETS = ['./', './index.html', './style.css', './app.js', './db.js', './opi.js',
   './manifest.webmanifest', './icon.svg', './icons/icon-192.png', './icons/icon-512.png'];
 
 self.addEventListener('install', (e) => {

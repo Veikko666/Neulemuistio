@@ -21,6 +21,9 @@ Tiedot ja kuvat tallentuvat **vain omalle laitteelle** (selaimen IndexedDB). Tun
   onko se jo käytössä toisessa keskeneräisessä työssä, ja puuttuvan voi lisätä omiin yhdellä napilla.
   Lisäksi silmukkamerkit ja muut välineet.
 - **Muistiinpanot** – päivätyt merkinnät nopeasti (Ctrl + Enter)
+- **Opi neulomaan** – aloittelijan oppitunnit järjestyksessä (tarvikkeet, luonti, oikea ja nurja silmukka,
+  päättely, virheiden korjaus, ohjeen lyhenteet, ensimmäinen työ), videolinkit ja vinkit kursseista.
+  Opitut tunnit voi merkitä, ja harjoitustilkun voi lisätä töihin yhdellä napilla.
 - Haku ja suodatus tilan mukaan
 - **Varmuuskopio** – vienti ja tuonti JSON-tiedostona (sisältää kuvat)
 
@@ -51,6 +54,7 @@ Sen jälkeen sovellus toimii myös offline.
 | `public/index.html` | Sivun runko |
 | `public/app.js` | Näkymät, tallennus, lankalaskuri, varmuuskopiot |
 | `public/db.js` | IndexedDB-tallennus |
+| `public/opi.js` | Opi neulomaan -sivun oppitunnit |
 | `public/style.css` | Ulkoasu (vaalea ja tumma teema) |
 | `public/sw.js`, `public/manifest.webmanifest` | Offline-tuki ja asennettavuus |
 | `wrangler.jsonc` | Cloudflare-julkaisun asetukset |
