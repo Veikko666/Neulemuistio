@@ -1,4 +1,5 @@
 import { db } from './db.js';
+import { LESSONS, RESOURCES, loadProgress, saveProgress, videoUrl } from './opi.js';
 
 // ---------- Vakiot ----------
 const STATUSES = {
@@ -340,6 +341,7 @@ async function route() {
   if (m) await showProject(m[1]);
   else if (location.hash.startsWith('#/valineet')) await showInventory();
   else if (location.hash.startsWith('#/langat')) await showStash();
+  else if (location.hash.startsWith('#/opi')) showLearn();
   else await showList();
   window.scrollTo(0, 0);
 }
@@ -388,6 +390,7 @@ const navHTML = (active) => `
     <a href="#/" class="${active === 'list' ? 'on' : ''}">📋 Työt</a>
     <a href="#/langat" class="${active === 'stash' ? 'on' : ''}">🧶 Langat</a>
     <a href="#/valineet" class="${active === 'inv' ? 'on' : ''}">🪡 Välineet</a>
+    <a href="#/opi" class="${active === 'learn' ? 'on' : ''}">📖 Opi</a>
   </nav>`;
 
 function renderGrid() {
@@ -836,6 +839,60 @@ function toolPickerHTML(p) {
     </select>`;
 }
 
+// ---------- Opi neulomaan -näkymä ----------
+function showLearn() {
+  cur = null;
+  document.title = 'Opi neulomaan – Neulemuistio';
+  const done = loadProgress();
+  const next = LESSONS.find((l) => !done[l.id]);
+  app.innerHTML = `
+    <header class="topbar">
+      <h1><img src="icon.svg" alt="" class="logo"> Neulemuistio</h1>
+    </header>
+    ${navHTML('learn')}
+    <p class="muted intro">Opettele neulomaan vaihe vaiheelta. Tee oppitunnit järjestyksessä ja merkitse ne opituiksi –
+      jokainen rakentuu edellisen päälle. Paras tulos syntyy, kun neulot vähän joka päivä.</p>
+    <div class="opi-progress" id="opiProgress">${learnProgressHTML(done)}</div>
+    <ol class="opi-list">${LESSONS.map((l, i) => lessonHTML(l, i, done, l === next)).join('')}</ol>
+    <section class="panel opi-res">
+      <h2>Parhaat tavat oppia lisää</h2>
+      ${RESOURCES.map((r) => `
+        <div class="opi-res-item">
+          <h3>${esc(r.title)}</h3>
+          <p>${esc(r.text)}</p>
+          ${r.links.length ? `<p class="opi-links">${r.links.map(([t, u]) => `<a href="${esc(u)}" target="_blank" rel="noopener">${esc(t)} ↗</a>`).join('')}</p>` : ''}
+        </div>`).join('')}
+    </section>`;
+}
+
+function learnProgressHTML(done) {
+  const n = LESSONS.filter((l) => done[l.id]).length;
+  const pct = Math.round((n / LESSONS.length) * 100);
+  return `<div class="opi-bar" role="progressbar" aria-valuenow="${n}" aria-valuemin="0" aria-valuemax="${LESSONS.length}"><span style="width:${pct}%"></span></div>
+    <span>${n === LESSONS.length ? '🎉 Kaikki oppitunnit tehty – olet neuloja!' : `${n} / ${LESSONS.length} oppituntia opittu`}</span>`;
+}
+
+function lessonHTML(l, i, done, open) {
+  const ok = !!done[l.id];
+  return `
+    <li class="panel opi-lesson ${ok ? 'done' : ''}" data-lesson="${l.id}">
+      <details ${open ? 'open' : ''}>
+        <summary>
+          <span class="opi-num">${ok ? '✓' : i + 1}</span>
+          <span class="opi-title"><strong>${esc(l.title)}</strong><small class="muted">${esc(l.time)}</small></span>
+        </summary>
+        <div class="opi-body">
+          ${l.body}
+          <div class="opi-actions">
+            <a class="btn small ghost" href="${esc(videoUrl(l.video))}" target="_blank" rel="noopener">▶ Katso video</a>
+            ${l.practice ? '<button class="btn small" data-action="opi-practice">+ Lisää harjoitustilkku töihin</button>' : ''}
+            <button class="btn small ${ok ? '' : 'primary'}" data-action="opi-toggle" data-id="${l.id}">${ok ? 'Merkitse keskeneräiseksi' : '✓ Osaan tämän'}</button>
+          </div>
+        </div>
+      </details>
+    </li>`;
+}
+
 // ---------- Omat välineet -näkymä ----------
 async function showInventory() {
   cur = null;
@@ -1020,6 +1077,42 @@ app.addEventListener('keydown', (e) => {
 
 // ---------- Toiminnot ----------
 const actions = {
+  'opi-toggle'(el) {
+    const done = loadProgress();
+    const id = el.dataset.id;
+    if (done[id]) delete done[id];
+    else done[id] = new Date().toISOString();
+    saveProgress(done);
+    const i = LESSONS.findIndex((l) => l.id === id);
+    const li = el.closest('.opi-lesson');
+    const next = done[id] ? LESSONS.slice(i + 1).find((l) => !done[l.id]) : null;
+    li.outerHTML = lessonHTML(LESSONS[i], i, done, !done[id]);
+    if (next) {
+      const nli = app.querySelector(`[data-lesson="${next.id}"]`);
+      nli.querySelector('details').open = true;
+      nli.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    document.getElementById('opiProgress').innerHTML = learnProgressHTML(done);
+    if (done[id]) toast('Hienoa! 🧶');
+  },
+  async 'opi-practice'() {
+    const p = newProject();
+    p.name = 'Harjoitustilkku';
+    p.status = 'kesken';
+    p.startDate = new Date().toISOString().slice(0, 10);
+    p.size = 'n. 10 × 10 cm';
+    p.pattern.name = 'Ainaoikea harjoitustilkku';
+    p.pattern.designer = 'Neulemuistion Opi-sivu';
+    p.tools.push({ id: uid(), type: 'puikot', size: '5', detail: 'bambu- tai puupuikot' });
+    p.notes.push({
+      id: uid(),
+      date: new Date().toISOString(),
+      text: 'Luo 20 silmukkaa. Neulo kaikki kerrokset oikein, kunnes tilkku on n. 10 × 10 cm. Laske silmukat joka kerroksen lopussa. Päättele löysästi.',
+    });
+    await db.put('projects', p);
+    toast('Harjoitustilkku lisätty töihin');
+    location.hash = '#/p/' + p.id;
+  },
   async new() {
     const p = newProject();
     await db.put('projects', p);
